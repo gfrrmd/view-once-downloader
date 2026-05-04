@@ -2,7 +2,7 @@ import os
 import io
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaPhoto
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
@@ -19,18 +19,40 @@ def escape_md(text: str) -> str:
     return text
 
 
+def is_view_once(message) -> bool:
+    """Cek apakah media adalah view once (ttl & noforwards)"""
+    media = message.media
+    if isinstance(media, MessageMediaPhoto):
+        return bool(getattr(media, "ttl_seconds", None))
+    if isinstance(media, MessageMediaDocument):
+        return bool(getattr(media, "ttl_seconds", None))
+    return False
+
+
+def is_timer(message) -> bool:
+    """Cek apakah media adalah timer (noforwards tapi bisa forward via API)"""
+    if is_view_once(message):
+        return False
+    media = message.media
+    if isinstance(media, (MessageMediaPhoto, MessageMediaDocument)):
+        return bool(getattr(message, "noforwards", False))
+    return False
+
+
 @client.on(events.NewMessage(outgoing=True, pattern=r"^\.dl$"))
 async def dl_command(event):
+    # Hapus command .dl LANGSUNG, tidak menunggu proses selesai
+    await event.delete()
+
     if not event.is_reply:
-        await event.delete()
         return
 
     replied = await event.get_reply_message()
 
     if not replied or not replied.media:
-        await event.delete()
         return
 
+    # Ambil info pengirim
     sender = await replied.get_sender()
     if sender:
         first_name = getattr(sender, "first_name", "") or ""
@@ -43,17 +65,25 @@ async def dl_command(event):
 
     chat = await event.get_chat()
     chat_title = escape_md(getattr(chat, "title", None) or "Private Chat")
-
     caption = f"\U0001f4e5 **Dari:** {mention}\n\U0001f4ac **Chat:** {chat_title}"
 
+    # --- METODE FORWARD (untuk timer media) ---
+    if is_timer(replied):
+        try:
+            await client.forward_messages("me", replied)
+            # Kirim caption terpisah karena forward tidak bisa custom caption
+            await client.send_message("me", caption, parse_mode="markdown")
+        except Exception:
+            pass
+        return
+
+    # --- METODE MANUAL (untuk view once) ---
     try:
         media_bytes = await client.download_media(replied.media, bytes)
     except Exception:
-        await event.delete()
         return
 
     if not media_bytes:
-        await event.delete()
         return
 
     file_obj = io.BytesIO(media_bytes)
@@ -78,10 +108,7 @@ async def dl_command(event):
         parse_mode="markdown"
     )
 
-    # Hanya hapus command .dl milik sendiri
-    await event.delete()
 
-
-print("\u2705 Userbot aktif. Balas media view-once dengan .dl")
+print("\u2705 Userbot aktif. Balas media view-once/timer dengan .dl")
 client.start()
 client.run_until_disconnected()
