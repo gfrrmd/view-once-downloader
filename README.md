@@ -1,6 +1,6 @@
 # View Once Downloader
 
-Telegram userbot untuk menyimpan media **view once / self-destruct** ke Saved Messages.
+Telegram bot untuk menyimpan media **view once / self-destruct** ke Saved Messages.
 
 ## Cara Pakai
 
